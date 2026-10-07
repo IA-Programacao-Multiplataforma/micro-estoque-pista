@@ -1,0 +1,31 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: estoque
+  data:
+    mongodb:
+      auto-index-creation: true
+      # Credenciais vêm de variáveis de ambiente (MONGO_URI, RABBITMQ_URI), nunca do código
+      uri: ${MONGO_URI}
+  rabbitmq:
+    addresses: ${RABBITMQ_URI}
+    publisher-confirm-type: correlated
+    listener:
+      simple:
+        default-requeue-rejected: false
+        retry:
+          enabled: true
+          max-attempts: 3
+          initial-interval: 1s
+          multiplier: 2.0
+
+estoque:
+  reserva:
+    max-ingressos-por-compra: 6
+    intervalo-expiracao-ms: 10000
+
+mensageria:
+  outbox:
+    intervalo-ms: 1000
