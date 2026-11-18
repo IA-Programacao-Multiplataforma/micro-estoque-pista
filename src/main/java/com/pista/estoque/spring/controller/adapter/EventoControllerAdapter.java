@@ -81,7 +81,6 @@ public class EventoControllerAdapter {
                 setor.preco(),
                 setor.capacidade(),
                 setor.disponivel(),
-                setor.reservado(),
                 setor.vendido()
         );
     }

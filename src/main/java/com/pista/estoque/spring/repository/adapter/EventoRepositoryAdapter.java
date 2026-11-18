@@ -36,11 +36,11 @@ public class EventoRepositoryAdapter {
 
     private static Setor castSetorOrm(SetorOrmMongo orm) {
         return new Setor(orm.id(), orm.nome(), orm.preco(), orm.capacidade(),
-                orm.disponivel(), orm.reservado(), orm.vendido());
+                orm.disponivel(), orm.vendido());
     }
 
     private static SetorOrmMongo castSetorEntity(Setor entity) {
         return new SetorOrmMongo(entity.id(), entity.nome(), entity.preco(), entity.capacidade(),
-                entity.disponivel(), entity.reservado(), entity.vendido());
+                entity.disponivel(), entity.vendido());
     }
 }

@@ -8,10 +8,11 @@ import org.springframework.transaction.support.TransactionTemplate;
 import com.mongodb.MongoException;
 import com.pista.estoque.domain.service.UnidadeDeTrabalho;
 
-// Repete a transação quando o Mongo avisa colisão ("TransientTransactionError"); sem isso, confirmações simultâneas falhariam à toa
+// Executa a transação. Se o evento estiver travado por outro pedido (lock), o Mongo devolve
+// "TransientTransactionError": esperamos um pouco e tentamos de novo, até a trava ser liberada
 public class MongoUnidadeDeTrabalho implements UnidadeDeTrabalho {
 
-    private static final int MAX_TENTATIVAS = 5;
+    private static final int MAX_TENTATIVAS = 10;
 
     private final TransactionTemplate template;
 

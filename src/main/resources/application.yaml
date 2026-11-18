@@ -1,5 +1,5 @@
 server:
-  port: 8082
+  port: ${PORT:8082}
 
 spring:
   application:
@@ -11,9 +11,9 @@ spring:
       uri: ${MONGO_URI}
   rabbitmq:
     addresses: ${RABBITMQ_URI}
-    publisher-confirm-type: correlated
     listener:
       simple:
+        # Se o processamento falhar, tenta 3 vezes e depois manda para a fila morta (.dlq)
         default-requeue-rejected: false
         retry:
           enabled: true
@@ -22,10 +22,4 @@ spring:
           multiplier: 2.0
 
 estoque:
-  reserva:
-    max-ingressos-por-compra: 6
-    intervalo-expiracao-ms: 10000
-
-mensageria:
-  outbox:
-    intervalo-ms: 1000
+  max-ingressos-por-compra: 6

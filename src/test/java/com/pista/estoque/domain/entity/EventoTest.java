@@ -18,8 +18,8 @@ class EventoTest {
 
     private static final LocalDateTime AGORA = LocalDateTime.of(2026, 10, 10, 12, 0);
 
-    private Setor setor(int capacidade, int disponivel, int reservado, int vendido) {
-        return new Setor("st", "Pista", BigDecimal.TEN, capacidade, disponivel, reservado, vendido);
+    private Setor setor(int capacidade, int disponivel, int vendido) {
+        return new Setor("st", "Pista", BigDecimal.TEN, capacidade, disponivel, vendido);
     }
 
     private Sessao sessao(LocalDateTime inicioVenda, Setor... setores) {
@@ -32,57 +32,55 @@ class EventoTest {
 
     @Test
     void statusEstreiaAntesDaAberturaDaVenda() {
-        Sessao s = sessao(AGORA.plusDays(1), setor(100, 100, 0, 0));
+        Sessao s = sessao(AGORA.plusDays(1), setor(100, 100, 0));
         assertThat(s.status(AGORA)).isEqualTo(StatusSessao.ESTREIA);
     }
 
     @Test
     void statusDisponivelQuandoVendaAbertaEHaIngressos() {
-        Sessao s = sessao(AGORA.minusDays(1), setor(100, 10, 50, 40));
+        Sessao s = sessao(AGORA.minusDays(1), setor(100, 10, 90));
         assertThat(s.status(AGORA)).isEqualTo(StatusSessao.DISPONIVEL);
     }
 
     @Test
     void statusEsgotadoQuandoNaoSobraNenhumIngresso() {
-        Sessao s = sessao(AGORA.minusDays(1), setor(100, 0, 20, 80));
+        Sessao s = sessao(AGORA.minusDays(1), setor(100, 0, 100));
         assertThat(s.status(AGORA)).isEqualTo(StatusSessao.ESGOTADO);
     }
 
     @Test
     void inicioDaVendaNaoPodeSerDepoisDoEvento() {
-        assertThatThrownBy(() -> new Sessao("s", AGORA, AGORA.plusDays(1), List.of(setor(1, 1, 0, 0))))
+        assertThatThrownBy(() -> new Sessao("s", AGORA, AGORA.plusDays(1), List.of(setor(1, 1, 0))))
                 .isInstanceOf(RegraDeNegocioException.class);
     }
 
     @Test
     void ajusteDeCapacidadeRecalculaODisponivel() {
-        Setor ajustado = setor(100, 10, 50, 40).ajustar(200, null);
+        Setor ajustado = setor(100, 10, 90).ajustar(200, null);
 
         assertThat(ajustado.capacidade()).isEqualTo(200);
         assertThat(ajustado.disponivel()).isEqualTo(110);
         assertThat(ajustado.capacidade())
-                .isEqualTo(ajustado.disponivel() + ajustado.reservado() + ajustado.vendido());
+                .isEqualTo(ajustado.disponivel() + ajustado.vendido());
     }
 
     @Test
-    void naoPermiteReduzirCapacidadeAbaixoDoReservadoMaisVendido() {
-        Setor s = setor(100, 10, 50, 40);
+    void naoPermiteReduzirCapacidadeAbaixoDoVendido() {
+        Setor s = setor(100, 10, 90);
 
         assertThatThrownBy(() -> s.ajustar(89, null)).isInstanceOf(ConflitoException.class);
         assertThat(s.ajustar(90, null).disponivel()).isZero();
     }
 
     @Test
-    void naoPermiteExcluirEventoComIngressoReservadoOuVendido() {
-        Evento comReserva = evento(sessao(AGORA, setor(100, 90, 10, 0)));
-        Evento comVenda = evento(sessao(AGORA, setor(100, 90, 0, 10)));
+    void naoPermiteExcluirEventoComIngressoVendido() {
+        Evento comVenda = evento(sessao(AGORA, setor(100, 90, 10)));
 
-        assertThatThrownBy(comReserva::validarExclusao).isInstanceOf(ConflitoException.class);
         assertThatThrownBy(comVenda::validarExclusao).isInstanceOf(ConflitoException.class);
     }
 
     @Test
     void permiteExcluirEventoSemMovimentacao() {
-        evento(sessao(AGORA, setor(100, 100, 0, 0))).validarExclusao();
+        evento(sessao(AGORA, setor(100, 100, 0))).validarExclusao();
     }
 }

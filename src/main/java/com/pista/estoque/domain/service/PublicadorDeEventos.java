@@ -1,6 +1,6 @@
 package com.pista.estoque.domain.service;
 
-// Outbox: a mensagem é gravada na mesma transação do efeito (os dois ou nenhum) e publicada no RabbitMQ depois
+// Envia uma mensagem ao RabbitMQ (exchange pista.eventos) com a routing key informada
 public interface PublicadorDeEventos {
     void publicar(String routingKey, Object dados);
 }

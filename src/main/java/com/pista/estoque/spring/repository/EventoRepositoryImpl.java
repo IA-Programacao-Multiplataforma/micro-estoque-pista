@@ -1,5 +1,6 @@
 package com.pista.estoque.spring.repository;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -52,50 +53,36 @@ public class EventoRepositoryImpl implements EventoRepository {
         return repository.findAll().stream().map(EventoRepositoryAdapter::castOrm).toList();
     }
 
-    // Filtro "disponivel >= quantidade" e $inc na mesma operação: dois clientes nunca levam o mesmo último ingresso
+    /*
+     * LOCK PESSIMISTA no MongoDB (ele não tem "SELECT ... FOR UPDATE"):
+     * a primeira operação da transação é uma ESCRITA no documento do evento (campo "travadoEm").
+     * O Mongo segura a trava desse documento até o commit ou rollback. Se outra transação tentar
+     * travar o mesmo evento nesse meio-tempo, ela recebe "WriteConflict" e espera para tentar de novo
+     * (quem repete é o MongoUnidadeDeTrabalho). Resultado: um pedido por vez mexe no estoque do evento.
+     */
     @Override
-    public boolean reservarIngressos(String eventoId, String sessaoId, String setorId, int quantidade) {
-        Query query = new Query(Criteria.where("_id").is(eventoId)
-                .and("sessoes").elemMatch(Criteria.where("id").is(sessaoId)
-                        .and("setores").elemMatch(Criteria.where("id").is(setorId)
-                                .and("disponivel").gte(quantidade))));
+    public boolean travarParaVenda(String sessaoId) {
+        Query query = new Query(Criteria.where("sessoes").elemMatch(Criteria.where("id").is(sessaoId)));
+        Update trava = new Update().set("travadoEm", Instant.now());
+        return mongoTemplate.updateFirst(query, trava, EventoOrmMongo.class).getMatchedCount() == 1;
+    }
 
-        return mongoTemplate.updateFirst(query, ajusteDeEstoque(sessaoId, setorId, -quantidade, quantidade),
-                EventoOrmMongo.class).getModifiedCount() == 1;
+    // Mesma trava, mas pelo id do evento (usada nas edições do cadastro)
+    @Override
+    public boolean travarEvento(String eventoId) {
+        Update trava = new Update().set("travadoEm", Instant.now());
+        return mongoTemplate.updateFirst(new Query(Criteria.where("_id").is(eventoId)), trava, EventoOrmMongo.class)
+                .getMatchedCount() == 1;
     }
 
     @Override
-    public void devolverIngressos(String eventoId, String sessaoId, String setorId, int quantidade) {
-        Query query = new Query(Criteria.where("_id").is(eventoId)
-                .and("sessoes").elemMatch(Criteria.where("id").is(sessaoId)
-                        .and("setores").elemMatch(Criteria.where("id").is(setorId)
-                                .and("reservado").gte(quantidade))));
-
-        mongoTemplate.updateFirst(query, ajusteDeEstoque(sessaoId, setorId, quantidade, -quantidade),
-                EventoOrmMongo.class);
-    }
-
-    @Override
-    public void confirmarVenda(String eventoId, String sessaoId, String setorId, int quantidade) {
-        Query query = new Query(Criteria.where("_id").is(eventoId)
-                .and("sessoes").elemMatch(Criteria.where("id").is(sessaoId)
-                        .and("setores").elemMatch(Criteria.where("id").is(setorId)
-                                .and("reservado").gte(quantidade))));
-
+    public void darBaixa(String eventoId, String sessaoId, String setorId, int quantidade) {
         Update update = new Update()
-                .inc("sessoes.$[s].setores.$[t].reservado", -quantidade)
+                .inc("sessoes.$[s].setores.$[t].disponivel", -quantidade)
                 .inc("sessoes.$[s].setores.$[t].vendido", quantidade)
                 .filterArray(Criteria.where("s._id").is(sessaoId))
                 .filterArray(Criteria.where("t._id").is(setorId));
 
-        mongoTemplate.updateFirst(query, update, EventoOrmMongo.class);
-    }
-
-    private Update ajusteDeEstoque(String sessaoId, String setorId, int deltaDisponivel, int deltaReservado) {
-        return new Update()
-                .inc("sessoes.$[s].setores.$[t].disponivel", deltaDisponivel)
-                .inc("sessoes.$[s].setores.$[t].reservado", deltaReservado)
-                .filterArray(Criteria.where("s._id").is(sessaoId))
-                .filterArray(Criteria.where("t._id").is(setorId));
+        mongoTemplate.updateFirst(new Query(Criteria.where("_id").is(eventoId)), update, EventoOrmMongo.class);
     }
 }

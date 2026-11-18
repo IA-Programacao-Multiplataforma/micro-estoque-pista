@@ -11,7 +11,6 @@ public record SetorOrmMongo(
         @Field(targetType = FieldType.DECIMAL128) BigDecimal preco,
         int capacidade,
         int disponivel,
-        int reservado,
         int vendido
 ) {
 }

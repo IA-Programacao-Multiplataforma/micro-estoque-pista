@@ -8,7 +8,6 @@ public record SetorResponse(
         BigDecimal preco,
         int capacidade,
         int disponivel,
-        int reservado,
         int vendido
 ) {
 }

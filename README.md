@@ -1,28 +1,44 @@
 # Estoque (porta 8082)
 
-Dono dos **eventos, sessões (datas) e setores** e da **reserva de ingressos**. Spring Boot, MongoDB (banco `pm_estoque`), RabbitMQ. Camadas: `domain` (regras em Java puro, portas) e `spring` (controllers, adapters, repositórios Mongo, mensageria).
+Dono dos **eventos, sessões (datas) e setores**, e da **quantidade de ingressos**. É o único serviço que altera o estoque. Spring Boot, MongoDB (banco `pm_estoque`), RabbitMQ.
 
 ## Modelo
-`Evento` → `Sessao` (data, início da venda) → `Setor` (nome, preço, capacidade, disponível, reservado, vendido). O status da sessão é calculado: `ESTREIA` (venda ainda não abriu), `DISPONIVEL` ou `ESGOTADO`.
+`Evento` → `Sessao` (data, início da venda) → `Setor` (nome, preço, capacidade, disponível, vendido). Invariante: `capacidade = disponível + vendido`. O status da sessão é calculado: `ESTREIA` (a venda ainda não abriu), `DISPONIVEL` ou `ESGOTADO`.
 
-## Endpoints
+## Mensageria: a venda
+| | |
+|---|---|
+| **Recebe** | `pedido.criado` (fila `estoque.pedido-criado`): pedidoId, sessaoId e itens |
+| **Envia** | `pedido.realizado` (havia ingressos, baixa feita) ou `pedido.cancelado` (com o motivo) |
+
+Quem decide é o [`VendaService`](src/main/java/com/pista/estoque/domain/service/VendaService.java), numa **transação com lock pessimista**:
+
+1. **trava** o evento da sessão: escreve nele primeiro, e o Mongo segura a trava até o commit (`EventoRepositoryImpl.travarParaVenda`);
+2. **lê** o disponível de cada setor, já com a trava;
+3. se há ingressos para todos os itens, **dá baixa** (`disponivel -= qtd`, `vendido += qtd`), faz o commit e envia `pedido.realizado`;
+4. se falta em algum setor, lança `VendaRecusadaException`: **rollback** (nenhuma baixa fica) e envia `pedido.cancelado`.
+
+Outro pedido para o mesmo evento, durante a transação, recebe `WriteConflict` e tenta de novo depois ([`MongoUnidadeDeTrabalho`](src/main/java/com/pista/estoque/spring/config/MongoUnidadeDeTrabalho.java), até 10 vezes). Resultado: nunca se vende mais do que existe no banco.
+
+Também são recusados: sessão inexistente, venda ainda não aberta, setor inexistente e mais de 6 ingressos por compra (`estoque.max-ingressos-por-compra`).
+
+## Endpoints (cadastro)
 Pelo gateway o prefixo é `/estoque`.
 
 | Método e caminho | O que faz | Acesso |
 |---|---|---|
 | `GET /eventos`, `GET /eventos/{id}` | Vitrine e detalhes (com sessões e setores) | público |
-| `GET /sessoes/{sessaoId}` | Disponibilidade por setor | público |
 | `POST /eventos` | Cria evento com sessões e setores | ADMIN |
+| `PUT /eventos/{id}` | Edita título, descrição, categoria, local, cidade e imagem | ADMIN |
+| `DELETE /eventos/{id}` | Exclui (recusa se já há ingressos vendidos) | ADMIN |
 | `POST /eventos/{id}/sessoes` | Acrescenta uma data | ADMIN |
-| `PUT /eventos/{id}/sessoes/{sessaoId}/setores/{setorId}` | Ajusta capacidade e/ou preço | ADMIN |
-| `DELETE /eventos/{id}` | Exclui (recusa se há ingressos reservados ou vendidos) | ADMIN |
-| `POST /reservas`, `GET /reservas/{id}`, `POST /reservas/{id}/liberar` | Reserva (sacola) | **interno**: só a fila chama, direto na 8082; o gateway bloqueia |
+| `PUT /eventos/{id}/sessoes/{sessaoId}` | Troca a data do evento e o início da venda | ADMIN |
+| `DELETE /eventos/{id}/sessoes/{sessaoId}` | Exclui a data (recusa se há ingressos vendidos ou se for a única data) | ADMIN |
+| `POST /eventos/{id}/sessoes/{sessaoId}/setores` | Acrescenta um tipo de ingresso (nome repetido na mesma data é recusado) | ADMIN |
+| `PUT /eventos/{id}/sessoes/{sessaoId}/setores/{setorId}` | Muda nome, capacidade e/ou preço (só o que for enviado; a capacidade não pode ficar abaixo do vendido) | ADMIN |
+| `DELETE /eventos/{id}/sessoes/{sessaoId}/setores/{setorId}` | Exclui o tipo de ingresso (recusa se há vendidos ou se for o único da data) | ADMIN |
 
-## Concorrência
-A reserva é uma **operação atômica** no Mongo (`updateFirst` com `elemMatch` e `arrayFilters`): se há ingresso, decrementa `disponivel` e incrementa `reservado` num passo só, então duas pessoas nunca levam o último ingresso. Uma tarefa (a cada 10 s) devolve ao estoque as reservas vencidas. Reservar de novo substitui a sacola anterior.
-
-## Mensageria (RabbitMQ)
-Consome `reserva.confirmar` (fila `estoque.reserva-confirmar`): transforma a reserva em venda, de forma **idempotente** e dentro de uma transação, e responde com `reserva.confirmada` ou `reserva.confirmacao-falhou`. A publicação usa **Transactional Outbox**: a mensagem é gravada no Mongo na mesma transação e um publicador (a cada 1 s) a envia ao broker. Falhou 3 vezes, vai para a fila morta (`.dlq`).
+Todas as alterações passam pelo [`EventoService`](src/main/java/com/pista/estoque/domain/service/EventoService.java), que roda numa transação e **trava o evento** antes de gravar (a mesma trava da venda). Assim uma edição nunca sobrescreve uma venda em andamento, e uma venda nunca acontece no meio de uma exclusão.
 
 ## Configuração
 | Variável | Para quê |
@@ -30,10 +46,8 @@ Consome `reserva.confirmar` (fila `estoque.reserva-confirmar`): transforma a res
 | `MONGO_URI` | MongoDB Atlas |
 | `RABBITMQ_URI` | CloudAMQP |
 
-No `application.yaml`: `estoque.reserva.max-ingressos-por-compra` (6) e `estoque.reserva.intervalo-expiracao-ms` (10 s).
-
 ## Como rodar e testar
 ```bash
 ./mvnw spring-boot:run
-./mvnw test      # 30 testes, sem banco nem RabbitMQ
+./mvnw test      # testes de domínio (EventoTest, VendaServiceTest), sem banco nem RabbitMQ
 ```
